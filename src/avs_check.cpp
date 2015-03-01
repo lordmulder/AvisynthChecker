@@ -137,6 +137,7 @@ static bool check_avs_helper(void)
 
 	//Print path
 	fwprintf(stderr, L"Avisynth_DLLPath=%s\n", avisynthPath);
+	fflush(stderr);
 
 	//Initialize Function Pointes
 	INIT_FUNCTION(avisynthLib, avs_create_script_environment);
@@ -173,6 +174,7 @@ static bool check_avs_helper(void)
 
 	//Print Avisynth Version:
 	fwprintf(stderr, L"Avisynth_Version=%.2f\n\n", avisynthVersion);
+	fflush(stderr);
 
 	//Clean up!
 	return true;
@@ -188,16 +190,19 @@ static bool check_avs(void)
 	fwprintf(stderr, L"This program is free software: you can redistribute it and/or modify\n");
 	fwprintf(stderr, L"it under the terms of the GNU General Public License <http://www.gnu.org/>.\n");
 	fwprintf(stderr, L"Note that this program is distributed with ABSOLUTELY NO WARRANTY.\n\n");
+	fflush(stderr);
 
 	//Check for Avisynth
 	const bool result = check_avs_helper();
 	if(result)
 	{
 		fwprintf(stderr, L"Avisynth v2.5+ (%s) is available on this machine :-)\n\n", ARCH_NAME);
+		fflush(stderr);
 	}
 	else
 	{
 		fwprintf(stderr, L"Avisynth v2.5+ (%s) is *NOT* available on this machine :-(\n\n", ARCH_NAME);
+		fflush(stderr);
 	}
 
 	return result;
