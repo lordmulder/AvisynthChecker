@@ -64,7 +64,7 @@ public:
 	{
 		return (m_library == NULL);
 	}
-	inline bool getPath(wchar_t *path, const DWORD length)
+	inline bool getPath(wchar_t *const path, const DWORD length)
 	{
 		if(!isNull())
 		{
@@ -73,7 +73,7 @@ public:
 		}
 		return false;
 	}
-	inline void* resolve(const char *name)
+	inline void* resolve(const char *const name)
 	{
 		if(!isNull())
 		{
@@ -97,7 +97,7 @@ do \
 } \
 while(0)
 
-static void fatal_exit(const wchar_t *message)
+static void fatal_exit(const wchar_t *const message)
 {
 	for(;;)
 	{
@@ -111,6 +111,53 @@ static void fatal_exit(const wchar_t *message)
 			TerminateProcess(GetCurrentProcess(), 666);
 		}
 	}
+}
+
+static void remove_ucn_prefix(wchar_t *filePath)
+{
+	if(wcslen(filePath) >= 6)
+	{
+		if((_wcsnicmp(filePath, L"\\\\?\\", 4) == 0) && iswalpha(filePath[4]) && (filePath[5] == L':'))
+		{
+			wchar_t *src = &filePath[4];
+			wchar_t *dst = &filePath[0];
+			for(;;)
+			{
+				*dst = *src;
+				if(!(*src))
+				{
+					break;
+				}
+				dst++; src++;
+			}
+		}
+	}
+}
+
+static bool get_real_filename(const wchar_t *const virtual_path, wchar_t *const real_path, const DWORD length)
+{
+	typedef DWORD (__stdcall *GetFinalPathNameByHandleFunc)(HANDLE hFile, LPWSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags);
+	Library kernel32(L"kernel32");
+	GetFinalPathNameByHandleFunc GetFinalPathNameByHandlePtr = (GetFinalPathNameByHandleFunc) kernel32.resolve("GetFinalPathNameByHandleW");
+	if(!GetFinalPathNameByHandlePtr)
+	{
+		return false;
+	}
+
+	const HANDLE hFile = CreateFileW(virtual_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if((hFile == INVALID_HANDLE_VALUE) || (hFile == NULL))
+	{
+		return false;
+	}
+
+	const DWORD ret = GetFinalPathNameByHandlePtr(hFile, real_path, length, 0);
+	if((length > 0) && (ret < length))
+	{
+		remove_ucn_prefix(real_path);
+		return true;
+	}
+
+	return false;
 }
 
 //=============================================================================
@@ -135,9 +182,18 @@ static bool check_avs_helper(void)
 		return false;
 	}
 
-	//Print path
-	fwprintf(stderr, L"Avisynth_DLLPath=%s\n", avisynthPath);
-	fflush(stderr);
+	//Determine the *real* Avisynth Path
+	wchar_t avisynthRealPath[4096];
+	if(get_real_filename(avisynthPath, avisynthRealPath, 4096))
+	{
+		fwprintf(stderr, L"Avisynth_DLLPath=%s\n", avisynthRealPath);
+		fflush(stderr);
+	}
+	else
+	{
+		fwprintf(stderr, L"Avisynth_DLLPath=%s\n", avisynthPath);
+		fflush(stderr);
+	}
 
 	//Initialize Function Pointes
 	INIT_FUNCTION(avisynthLib, avs_create_script_environment);
