@@ -40,7 +40,14 @@ static const wchar_t *ARCH_NAME = L"x64";
 static const wchar_t *ARCH_NAME = L"x86";
 #endif
 
+//Const
 #define DBL_NAN (std::numeric_limits<double>::quiet_NaN())
+
+//Exit codes
+static const int EXIT_LOAD_LIBRARY_FAILED    = 1;
+static const int EXIT_DERTERMINE_PATH_FAILED = 2;
+static const int EXIT_RESOLVE_ENTRYPT_FAILED = 3;
+static const int EXIT_CHECK_VERSION_FAILED   = 4;
 
 //=============================================================================
 // UTILITY FUNCTIONS
@@ -52,7 +59,9 @@ public:
 	Library(const wchar_t *name)
 	{
 		m_library = LoadLibraryW(name);
+		m_error = m_library ? ERROR_SUCCESS : GetLastError();
 	}
+
 	~Library()
 	{
 		if(!isNull())
@@ -60,30 +69,56 @@ public:
 			FreeLibrary(m_library);
 		}
 	}
+
 	inline bool isNull(void)
 	{
 		return (m_library == NULL);
 	}
+
+	inline DWORD getError(void)
+	{
+		return m_error;
+	}
+
 	inline bool getPath(wchar_t *const path, const DWORD length)
 	{
 		if(!isNull())
 		{
 			const DWORD ret = GetModuleFileNameW(m_library, path, length);
+			m_error = (ret != 0) ? ERROR_SUCCESS : GetLastError();
 			return (ret > 0) && (ret < length);
 		}
+		m_error = ERROR_INVALID_FUNCTION;
 		return false;
 	}
+
 	inline void* resolve(const char *const name)
 	{
 		if(!isNull())
 		{
-			return GetProcAddress(m_library, name);
+			void *const ret = GetProcAddress(m_library, name);
+			m_error = (ret) ? ERROR_SUCCESS : GetLastError();
+			return ret;
 		}
+		m_error = ERROR_INVALID_FUNCTION;
 		return NULL;
 	}
+
 private:
 	HMODULE m_library;
+	DWORD m_error;
 };
+
+#define PRINT_ERROR_MSG(CODE) \
+do \
+{ \
+	if (const wchar_t *const _msg_buffer = get_error_string((CODE))) \
+	{ \
+		fwprintf(stderr, L"%s\n\n", _msg_buffer); \
+		free((void*)_msg_buffer); \
+	} \
+} \
+while(0)
 
 #define INIT_FUNCTION(LIB, NAME) NAME##_func NAME##_ptr; \
 do \
@@ -91,8 +126,10 @@ do \
 	NAME##_ptr = (NAME##_func) (LIB).resolve(#NAME); \
 	if(NAME##_ptr == NULL) \
 	{ \
-		fwprintf(stderr, L"\nERROR: Function '%S' could not be resolved!\n\n", #NAME); \
-		return false; \
+		const DWORD _errorCode = (LIB).getError(); \
+		fwprintf(stderr, L"\nERROR: Function '%S' could not be resolved! [0x%X]\n\n", #NAME, _errorCode); \
+		PRINT_ERROR_MSG(_errorCode); \
+		return EXIT_RESOLVE_ENTRYPT_FAILED; \
 	} \
 } \
 while(0)
@@ -108,9 +145,24 @@ static void fatal_exit(const wchar_t *const message)
 		}
 		__finally
 		{
-			TerminateProcess(GetCurrentProcess(), 666);
+			TerminateProcess(GetCurrentProcess(), UINT(-1));
 		}
 	}
+}
+
+static const wchar_t *get_error_string(const DWORD code)
+{
+	const wchar_t *buffer = NULL, *result = NULL;
+	const size_t size = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, code, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPWSTR)&buffer, 0, NULL);
+	if (buffer)
+	{
+		if (size > 0)
+		{
+			result = _wcsdup(buffer);
+		}
+		LocalFree((HLOCAL)buffer);
+	}
+	return result;
 }
 
 static void remove_ucn_prefix(wchar_t *filePath)
@@ -164,22 +216,26 @@ static bool get_real_filename(const wchar_t *const virtual_path, wchar_t *const 
 // MAIN FUNCTION
 //=============================================================================
 
-static bool check_avs_helper(void)
+static int check_avs_helper(void)
 {
 	//Load Avisynth DLL
 	Library avisynthLib(L"avisynth");
 	if(avisynthLib.isNull())
 	{
-		fwprintf(stderr, L"ERROR: Avisynth DLL could not be loaded!\n\n");
-		return false;
+		const DWORD errorCode = avisynthLib.getError();
+		fwprintf(stderr, L"ERROR: Avisynth DLL could not be loaded! [0x%X]\n\n", errorCode);
+		PRINT_ERROR_MSG(errorCode);
+		return EXIT_LOAD_LIBRARY_FAILED;
 	}
 
 	//Determine Avisynth DLL Path
 	wchar_t avisynthPath[4096];
 	if(!avisynthLib.getPath(avisynthPath, 4096))
 	{
-		fwprintf(stderr, L"ERROR: Failed to determine Avisynth DLL path!\n\n");
-		return false;
+		const DWORD errorCode = avisynthLib.getError();
+		fwprintf(stderr, L"ERROR: Failed to determine Avisynth DLL path! [0x%X]\n\n", errorCode);
+		PRINT_ERROR_MSG(errorCode);
+		return EXIT_DERTERMINE_PATH_FAILED;
 	}
 
 	//Determine the *real* Avisynth Path
@@ -225,7 +281,7 @@ static bool check_avs_helper(void)
 	if(isnan(avisynthVersion) || (avisynthVersion < 2.5))
 	{
 		fwprintf(stderr, L"\nERROR: Failed to determine Avisynth version!\n\n");
-		return false;
+		return EXIT_CHECK_VERSION_FAILED;
 	}
 
 	//Print Avisynth Version:
@@ -233,10 +289,10 @@ static bool check_avs_helper(void)
 	fflush(stderr);
 
 	//Clean up!
-	return true;
+	return EXIT_SUCCESS;
 }
 
-static bool check_avs(void)
+static int check_avs(void)
 {
 	_setmode(_fileno(stderr), _O_U8TEXT);
 
@@ -248,8 +304,25 @@ static bool check_avs(void)
 	fwprintf(stderr, L"Note that this program is distributed with ABSOLUTELY NO WARRANTY.\n\n");
 	fflush(stderr);
 
+	//FOR DEBUG
+	size_t required = 0;
+	_wgetenv_s(&required, NULL, 0, L"PATH");
+	if (required > 0)
+	{
+		const size_t buffSize = required;
+		wchar_t *const buffer = (wchar_t*)malloc(sizeof(wchar_t) * buffSize);
+		if (buffer)
+		{
+			if (_wgetenv_s(&required, buffer, buffSize, L"PATH") == 0)
+			{
+				fwprintf(stderr, L"PATH: %s\n\n", buffer);
+			}
+			free(buffer);
+		}
+	}
+
 	//Check for Avisynth
-	const bool result = check_avs_helper();
+	const int result = check_avs_helper();
 	if(result)
 	{
 		fwprintf(stderr, L"Avisynth v2.5+ (%s) is available on this machine :-)\n\n", ARCH_NAME);
@@ -285,7 +358,7 @@ static LONG WINAPI my_exception_handler(struct _EXCEPTION_POINTERS *ExceptionInf
 // ENTRY POINT
 //=============================================================================
 
-static bool main_ex(void)
+static int main_ex(void)
 {
 	try
 	{
@@ -294,7 +367,7 @@ static bool main_ex(void)
 	catch(...)
 	{
 		fatal_exit(L"\nFATAL ERROR: Unhandeled C++ exception!\n\n");
-		return false;
+		return -1;
 	}
 }
 
@@ -306,7 +379,7 @@ int wmain(int argc, wchar_t* argv[])
 		SetUnhandledExceptionFilter(my_exception_handler);
 		_set_invalid_parameter_handler(my_invalid_param_handler);
 		SetDllDirectoryW(L""); /*don'tload DLL from "current" directory*/
-		return main_ex() ? EXIT_SUCCESS : EXIT_FAILURE;
+		return main_ex();
 	}
 	__except(1)
 	{
