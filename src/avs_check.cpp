@@ -19,6 +19,18 @@
 // http://www.gnu.org/licenses/gpl-2.0.txt
 ///////////////////////////////////////////////////////////////////////////////
 
+//Validation
+#if (defined(_DEBUG) && defined(NDEBUG)) || ((!defined(_DEBUG)) && (!defined(NDEBUG)))
+#error Inconsistent debug flags!
+#endif
+
+//Debug
+#ifndef NDEBUG
+#define ENABLE_DEBUG 1
+#else
+#define ENABLE_DEBUG 0
+#endif
+
 //CRT
 #include <cstdlib>
 #include <cstdio>
@@ -304,20 +316,23 @@ static int check_avs(void)
 	fwprintf(stderr, L"Note that this program is distributed with ABSOLUTELY NO WARRANTY.\n\n");
 	fflush(stderr);
 
-	//FOR DEBUG
-	size_t required = 0;
-	_wgetenv_s(&required, NULL, 0, L"PATH");
-	if (required > 0)
+	//Dump environemnt variable PATH (for DEBUG)
+	if (ENABLE_DEBUG)
 	{
-		const size_t buffSize = required;
-		wchar_t *const buffer = (wchar_t*)malloc(sizeof(wchar_t) * buffSize);
-		if (buffer)
+		size_t required = 0;
+		const errno_t error = _wgetenv_s(&required, NULL, 0, L"PATH");
+		if (((!error) || (error == ERANGE)) && (required > 0))
 		{
-			if (_wgetenv_s(&required, buffer, buffSize, L"PATH") == 0)
+			const size_t buffSize = required;
+			wchar_t *const buffer = (wchar_t*)malloc(sizeof(wchar_t) * buffSize);
+			if (buffer)
 			{
-				fwprintf(stderr, L"PATH: %s\n\n", buffer);
+				if (_wgetenv_s(&required, buffer, buffSize, L"PATH") == 0)
+				{
+					fwprintf(stderr, L"PATH: %s\n\n", buffer);
+				}
+				free(buffer);
 			}
-			free(buffer);
 		}
 	}
 
@@ -373,6 +388,7 @@ static int main_ex(void)
 
 int wmain(int argc, wchar_t* argv[])
 {
+#if(!(ENABLE_DEBUG))
 	__try
 	{
 		SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
@@ -381,10 +397,14 @@ int wmain(int argc, wchar_t* argv[])
 		SetDllDirectoryW(L""); /*don'tload DLL from "current" directory*/
 		return main_ex();
 	}
-	__except(1)
+	__except (1)
 	{
 		fatal_exit(L"\nFATAL ERROR: Unhandeled structured exception!\n\n");
 		return -1;
 	}
+#else
+	SetDllDirectoryW(L""); /*don'tload DLL from "current" directory*/
+	return check_avs();
+#endif
 }
 
