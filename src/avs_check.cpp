@@ -164,13 +164,22 @@ static void fatal_exit(const wchar_t *const message)
 
 static const wchar_t *get_error_string(const DWORD code)
 {
-	const wchar_t *buffer = NULL, *result = NULL;
+	wchar_t *buffer = NULL, *result = NULL;
 	const size_t size = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, code, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPWSTR)&buffer, 0, NULL);
 	if (buffer)
 	{
-		if (size > 0)
+		if ((size > 0) && (result = _wcsdup(buffer)))
 		{
-			result = _wcsdup(buffer);
+			size_t len = wcslen(result);
+			while (len > 0)
+			{
+				const wchar_t c = result[--len];
+				if ((c != L'\r') && (c != L'\n'))
+				{
+					break;
+				}
+				result[len] = '\0';
+			}
 		}
 		LocalFree((HLOCAL)buffer);
 	}
@@ -338,7 +347,7 @@ static int check_avs(void)
 
 	//Check for Avisynth
 	const int result = check_avs_helper();
-	if(result)
+	if(result == EXIT_SUCCESS)
 	{
 		fwprintf(stderr, L"Avisynth v2.5+ (%s) is available on this machine :-)\n\n", ARCH_NAME);
 		fflush(stderr);
